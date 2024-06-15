@@ -22,6 +22,7 @@ from pre_commit.util import make_executable
 from pre_commit.util import win_exe
 
 ENVIRONMENT_DIR = 'rustenv'
+FEATURE_PREFIX = '--feature='
 health_check = lang_base.basic_health_check
 run_hook = lang_base.basic_run_hook
 
@@ -55,7 +56,8 @@ def get_env_patch(target_dir: str, version: str) -> PatchesT:
         # toolchain
         *(
             (('RUSTUP_TOOLCHAIN', _rust_toolchain(version)),)
-            if version != 'system' else ()
+            if version != 'system'
+            else ()
         ),
     )
 
@@ -68,11 +70,13 @@ def in_env(prefix: Prefix, version: str) -> Generator[None, None, None]:
 
 
 def _add_dependencies(
-        prefix: Prefix,
-        additional_dependencies: set[str],
+    prefix: Prefix,
+    additional_dependencies: set[str],
 ) -> None:
     crates = []
     for dep in additional_dependencies:
+        if dep.startswith(FEATURE_PREFIX):
+            continue
         name, _, spec = dep.partition(':')
         crate = f'{name}@{spec or "*"}'
         crates.append(crate)
@@ -100,20 +104,27 @@ def install_rust_with_toolchain(toolchain: str, envdir: str) -> None:
 
                 # install rustup into `$CARGO_HOME/bin`
                 cmd_output_b(
-                    rustup_init, '-y', '--quiet', '--no-modify-path',
-                    '--default-toolchain', 'none',
+                    rustup_init,
+                    '-y',
+                    '--quiet',
+                    '--no-modify-path',
+                    '--default-toolchain',
+                    'none',
                 )
 
             cmd_output_b(
-                'rustup', 'toolchain', 'install', '--no-self-update',
+                'rustup',
+                'toolchain',
+                'install',
+                '--no-self-update',
                 toolchain,
             )
 
 
 def install_environment(
-        prefix: Prefix,
-        version: str,
-        additional_dependencies: Sequence[str],
+    prefix: Prefix,
+    version: str,
+    additional_dependencies: Sequence[str],
 ) -> None:
     envdir = lang_base.environment_dir(prefix, ENVIRONMENT_DIR, version)
 
@@ -129,6 +140,12 @@ def install_environment(
     # with 'cli:'.
     cli_deps = {
         dep for dep in additional_dependencies if dep.startswith('cli:')
+    }
+    # Features starts with "--feature="
+    features = {
+        dep.replace(FEATURE_PREFIX, '')
+        for dep in additional_dependencies
+        if dep.startswith(FEATURE_PREFIX)
     }
     lib_deps = set(additional_dependencies) - cli_deps
 
@@ -153,8 +170,17 @@ def install_environment(
         if len(lib_deps) > 0:
             _add_dependencies(prefix, lib_deps)
 
+        features_params = []
+        if features:
+            features_params = ['--features', *features]
         for args in packages_to_install:
             cmd_output_b(
-                'cargo', 'install', '--bins', '--root', envdir, *args,
+                'cargo',
+                'install',
+                '--bins',
+                '--root',
+                envdir,
+                *args,
+                *features_params,
                 cwd=prefix.prefix_dir,
             )
